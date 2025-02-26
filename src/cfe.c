@@ -452,18 +452,21 @@ void Xinanjiang_partitioning_scheme(double water_input_depth_m, double field_cap
   free_water_m = column_total_soil_water_m - field_capacity_m;
 
   if(0.0 < free_water_m) {      //edit FLO
-    tension_water_m = field_capacity_m;
+    tension_water_m = column_total_soil_water - field_capacity_m;  // fixed this bug FLO 2/25
   } else {
     free_water_m = 0.0;
     tension_water_m = column_total_soil_water_m;
   }
 
   // estimate the maximum free water and tension water available in the soil column
-  max_free_water_m = max_soil_moisture_storage_m - field_capacity_m;
-  max_tension_water_m = field_capacity_m;
+  /* These are defined backwards FLO 2/25 */
+  // max_free_water_m = max_soil_moisture_storage_m - field_capacity_m;
+  // max_tension_water_m = field_capacity_m;
+  max_free_water_m = field_capacity_m;
+  max_tension_water_m = max_soil_moisture_storage_m - field_capacity_m
 
   if (max_free_water_m <= 0 || max_tension_water_m <=0) { //edited by RLM; added logic block to handle parameter values of zero.
-      *infiltration_excess_m = 0.95 * water_input_depth_m;
+      *infiltration_excess_m = 0.95 * water_input_depth_m;  
 
   } else {
 
@@ -480,11 +483,31 @@ void Xinanjiang_partitioning_scheme(double water_input_depth_m, double field_cap
     impervious_runoff_m = impervious_fraction * water_input_depth_m;
 
     // Calculate total estimated pervious runoff.
+
+    // Rewritten Feb 2025 by FLO to fix a bug, and use notation consistent with Jayawardena and Zhou (2000)
+    double c = parms->a_Xinanjiang_inflection_point_parameter;
+    double b = parms->b_Xinanjiang_shape_parameter;
+
+    /* FLO- the use of only tension water in the Xinanjiang method is incorrect.  Xinanjiang runoff generation depends on total water storage, not just tension water storage.
+            Liang, Lettenmaier, Wood & Burges (1994), Wood, Lettenmaier & Zartarian (1992).
+    double Wm    = tension_water_m;
+    double Wmmax = max_tension_water_m;
+    ***********************************/
+    double Wm = column_total_soil_water_m;
+    double Wmmax = max_soil_moisture_storage_m;
+
+    if(Wm/Wmmax <= (0.5 - c)  {
+	double f_over_F =       pow( (0.5 - c) , (1.0 - b) ) * pow( (Wm/Wmmax) , b));  // Eqn. 2a in Jayawardena & Zhu
+    } else {  // 0.5-c < Wm/Wmmax 
+	double f_over_F = 1.0 - pow( (0.5 + a) , (1.0 - b) ) * pow((1.0 - (Wm/Wmmax)) , b)); // Eqn. 2b in Jayawardena & Zhu
+    }
+    pervious_runoff_m = (1.0- impervious_fraction) * water_input_depth_m * f_over_F;
+/********************  previous code *********************************************************************	  
     if ((tension_water_m/max_tension_water_m) <= (0.5 - parms->a_Xinanjiang_inflection_point_parameter)) {
-      pervious_runoff_m = (1 - impervious_fraction) * water_input_depth_m *
+      pervious_runoff_m = (1 - impervious_fraction) * water_input_depth_m * 
 						(pow((0.5 - parms->a_Xinanjiang_inflection_point_parameter),
                              (1.0 - parms->b_Xinanjiang_shape_parameter)) *
-                         pow((1.0 - (tension_water_m/max_tension_water_m)),
+                         pow((1.0 - (tension_water_m/max_tension_water_m)),  // bug here, should not be "1-(...) FLO  This is a major bug.  Fixed above in Eqn. 2a.
                              parms->b_Xinanjiang_shape_parameter));
 
   } else {
@@ -493,16 +516,17 @@ void Xinanjiang_partitioning_scheme(double water_input_depth_m, double field_cap
                                                          (1.0 - parms->b_Xinanjiang_shape_parameter)) *
                                                      pow((1.0 - (tension_water_m/max_tension_water_m)),
                                                          (parms->b_Xinanjiang_shape_parameter)));
-      }
+  }
+  **********************************************************************************************************/
       // Separate the surface water from the pervious runoff
       // NOTE: If impervious runoff is added to this subroutine, impervious runoff should be added to
-      // the infiltration_excess_m.
-      *infiltration_excess_m = pervious_runoff_m * (1.0 - pow((1.0 - (free_water_m/max_free_water_m)),parms->x_Xinanjiang_shape_parameter));
+      // the infiltration_excess_m.  Can someone provide a reference for this?  -FLO
+  *infiltration_excess_m = pervious_runoff_m * (1.0 - pow((1.0 - (free_water_m/max_free_water_m)),parms->x_Xinanjiang_shape_parameter));
   }
 
   // Separate the surface water from the pervious runoff
   *infiltration_excess_m = pervious_runoff_m * (1.0 - pow((1.0 -
-				(free_water_m/max_free_water_m)),parms->x_Xinanjiang_shape_parameter)) + impervious_runoff_m;
+				(free_water_m/max_free_water_m)),parms->x_Xinanjiang_shape_parameter)) + impervious_runoff_m;  // why is this done twice when previous if() is true?
 
   // The surface runoff depth is bounded by a minimum of 0 and a maximum of the water input depth.
   // Check that the estimated surface runoff is not less than 0.0 and if so, change the value to 0.0.
